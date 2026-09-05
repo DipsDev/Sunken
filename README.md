@@ -1,6 +1,6 @@
-# Blindfold (React + TypeScript)
+# Sunken (React + TypeScript)
 
-A TypeScript port of the React + Vite version of `blindfold.html`. Same
+A TypeScript port of the React + Vite version of `sunken.html`. Same
 behavior — everything is client-side and local (no network calls, no
 server), with all data in the browser's `localStorage`.
 

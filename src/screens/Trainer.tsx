@@ -1,32 +1,112 @@
-import { useEffect, useRef, useState } from 'react';
-import type { Draft, Entry, Grid } from '../types';
-import { genPassword, sha256Hex, passwordToBigInt } from '../lib/crypto';
-import { splitSecret } from '../lib/shamir';
-import { buildGrid } from '../lib/grid';
+import { useEffect, useMemo, useRef, useState } from "react";
+import type { CodePath, Draft, Entry, Grid } from "../types";
+import { genPassword, sharesToHexStrings } from "../lib/crypto";
+import { split } from "shamir-secret-sharing";
+import { generateGShapeSecretSudoku } from "../lib/sudoku";
 
 interface TrainerProps {
   draft: Draft;
-  onFinish: (entry: Entry, shareTexts: string[] | null, gridData: Grid | null) => void;
+  onFinish: (
+    entry: Entry,
+    shareTexts: string[] | null,
+    gridData: Grid | null,
+    codePath: CodePath | null,
+  ) => void;
+}
+
+interface GeneratedSetup {
+  password: string;
+  gridData: Grid | null;
+  codePath: CodePath | null;
+}
+
+/**
+ * Asynchronously generates a valid password and attempts Sudoku generation up to maxRetries times.
+ */
+async function generateSetup(
+  draft: Draft,
+  maxRetries = 3,
+): Promise<GeneratedSetup> {
+  let attempts = 0;
+
+  while (attempts < maxRetries) {
+    attempts++;
+    // Yield to the main thread briefly so UI renders the loading state smoothly
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    const pwd = genPassword(draft.type, draft.length);
+
+    if (draft.method === "grid" || draft.method === "both") {
+      try {
+        const grid = generateGShapeSecretSudoku(pwd, "expert");
+        return {
+          password: pwd,
+          gridData: grid.puzzle,
+          codePath: grid.codePath as CodePath,
+        };
+      } catch {
+        continue;
+      }
+    } else {
+      return { password: pwd, gridData: null, codePath: null };
+    }
+  }
+
+  throw new Error(
+    `Failed to generate a valid Sudoku grid after ${maxRetries} attempts.`,
+  );
 }
 
 export default function Trainer({ draft, onFinish }: TrainerProps) {
-  const [password] = useState(() => genPassword(draft.type, draft.length));
+  const [setup, setSetup] = useState<GeneratedSetup | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
   const [round, setRound] = useState<1 | 2>(1);
   const [pos, setPos] = useState(0);
-  const [inputValue, setInputValue] = useState('');
-  const [msg, setMsg] = useState('');
-  const [msgClass, setMsgClass] = useState('');
-  const [charVisible, setCharVisible] = useState(true);
-  const [disabled, setDisabled] = useState(false);
   const [finishing, setFinishing] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  const total = draft.length;
-  const target = password[pos];
+  // Generate valid password & grid asynchronously on component mount
+  useEffect(() => {
+    let isMounted = true;
+    setLoading(true);
+
+    generateSetup(draft, 5)
+      .then((data) => {
+        if (isMounted) {
+          setSetup(data);
+          setLoading(false);
+        }
+      })
+      .catch((err) => {
+        if (isMounted) {
+          setError(err.message || "Failed to initialize trainer session.");
+          setLoading(false);
+        }
+      });
+
+    return () => {
+      isMounted = false;
+    };
+  }, [draft]);
+
+  const bloatedPassword = useMemo(() => {
+    if (!setup?.password) return [];
+    return setup.password.split("").flatMap((letter) => {
+      const randomChar = genPassword(draft.type, 1)[0];
+      return Math.random() < 0.8 ? [randomChar, "Delete", letter] : [letter];
+    });
+  }, [setup?.password, draft.type, round]);
+
+  const total = bloatedPassword.length;
+  const target = bloatedPassword[pos];
 
   useEffect(() => {
-    if (!finishing) inputRef.current?.focus();
-  }, [pos, round, finishing]);
+    if (!finishing && !loading && setup) {
+      inputRef.current?.focus();
+    }
+  }, [pos, round, finishing, loading, setup]);
 
   function advance() {
     const nextPos = pos + 1;
@@ -36,65 +116,71 @@ export default function Trainer({ draft, onFinish }: TrainerProps) {
         setPos(0);
       } else {
         finish();
-        return;
       }
     } else {
       setPos(nextPos);
     }
-    setCharVisible(true);
-    setDisabled(false);
-    setInputValue('');
-    setMsg('');
-  }
-
-  function submit() {
-    const val = inputValue.trim().toUpperCase();
-    if (val === target) {
-      setMsg('Good — clearing it now.');
-      setMsgClass('ok');
-      setCharVisible(false);
-      setDisabled(true);
-      setTimeout(advance, 550);
-    } else {
-      setMsg("That's not what was shown — try again.");
-      setMsgClass('error');
-      setInputValue('');
-    }
   }
 
   async function finish() {
+    if (!setup) return;
     setFinishing(true);
-    const hash = await sha256Hex(password);
+
+    let shareTexts: string[] | null = null;
+
+    if (draft.method === "shares" || draft.method === "both") {
+      const encodedPassword = new TextEncoder().encode(setup.password);
+      const shares = await split(
+        encodedPassword,
+        draft.totalShares,
+        draft.threshold,
+      );
+      shareTexts = sharesToHexStrings(shares);
+    }
+
     const entry: Entry = {
       label: draft.label,
       type: draft.type,
       length: draft.length,
       method: draft.method,
-      hash,
-      createdAt: Date.now(),
+      hash: "",
+      createdAt: new Date().toISOString(),
     };
 
-    let shareTexts: string[] | null = null;
-    let gridData: Grid | null = null;
-
-    if (draft.method === 'shares' || draft.method === 'both') {
-      const k = draft.k!;
-      const n = draft.n!;
-      entry.k = k;
-      entry.n = n;
-      const secretBig = passwordToBigInt(password, draft.type);
-      const shares = splitSecret(secretBig, k, n);
-      shareTexts = shares.map(s => `${draft.label}|k=${k}|n=${n}|x=${s.x}|y=${s.y.toString(36)}`);
-    }
-    if (draft.method === 'grid' || draft.method === 'both') {
-      const grid = buildGrid(password, draft.type);
-      entry.grid = grid;
-      gridData = grid;
+    if (draft.method === "shares" || draft.method === "both") {
+      entry.totalShares = draft.totalShares;
+      entry.threshold = draft.threshold;
     }
 
-    onFinish(entry, shareTexts, gridData);
+    onFinish(entry, shareTexts, setup.gridData, setup.codePath);
   }
 
+  // Initial setup loading screen
+  if (loading) {
+    return (
+      <div className="card">
+        <h2>Preparing Trainer&hellip;</h2>
+        <p className="subtext">Generating puzzle and verifying secret path.</p>
+      </div>
+    );
+  }
+
+  // Failure fallback if grid cannot be created after max retries
+  if (error || !setup) {
+    return (
+      <div className="card">
+        <h2>Generation Failed</h2>
+        <p className="subtext">
+          {error || "Could not generate a valid configuration."}
+        </p>
+        <button className="btn" onClick={() => window.location.reload()}>
+          Try Again
+        </button>
+      </div>
+    );
+  }
+
+  // Finishing screen
   if (finishing) {
     return (
       <div className="card">
@@ -104,41 +190,37 @@ export default function Trainer({ draft, onFinish }: TrainerProps) {
     );
   }
 
-  const dots = Array.from({ length: total }, (_, i) => (
-    <div key={i} className={`dot ${i < pos ? 'filled' : ''}`}></div>
+  const dots = Array.from({ length: total - 1 }, (_, i) => (
+    <div key={i} className={`dot ${i < pos ? "filled" : ""}`}></div>
   ));
 
   return (
     <div className="card">
-      <div className="round-label">{round === 1 ? 'FIRST PASS — SET IT' : 'SECOND PASS — CONFIRM IT'}</div>
-      <h2>{round === 1 ? 'Type each character, then let it go' : 'Once more, to make sure it stuck'}</h2>
+      <div className="round-label">
+        {round === 1 ? "FIRST PASS — SET IT" : "SECOND PASS — CONFIRM IT"}
+      </div>
+      <h2>
+        {round === 1 ? "Type each character, then press next" : "Once more"}
+      </h2>
       <p className="subtext">
         {round === 1
-          ? `A character will appear. Type it into the field below (or into ${draft.label}'s own password field, if you have it open) — then it disappears before the next one shows up. You'll never see the whole code at once.`
-          : `Same rhythm, same order — one more time, so your fingers have it even if your memory doesn't.`}
+          ? `A character will appear. Type it into ${draft.label}'s password field. If the character tells you to delete it, then do as it says.`
+          : `Same code, different way. Just to make sure you followed the instructions correctly.`}
       </p>
 
       <div className="trainer-window">
-        <div className="trainer-char" style={{ opacity: charVisible ? 1 : 0 }}>{target}</div>
-        <div className="trainer-instructions">character {pos + 1} of {total}</div>
+        <div className="trainer-char">{target}</div>
+        <div className="trainer-instructions">
+          character {pos + 1} of {total}
+        </div>
       </div>
       <div className="dots">{dots}</div>
 
       <div className="trainer-input-row">
-        <input
-          ref={inputRef}
-          type="text"
-          maxLength={1}
-          autoComplete="off"
-          autoCapitalize="characters"
-          value={inputValue}
-          disabled={disabled}
-          onChange={e => setInputValue(e.target.value)}
-          onKeyDown={e => { if (e.key === 'Enter') submit(); }}
-        />
-        <button className="btn" disabled={disabled} onClick={submit}>Enter</button>
+        <button className="btn" onClick={advance}>
+          {pos + 1 === total ? "Finish" : "Next"}
+        </button>
       </div>
-      <div className={`trainer-msg ${msgClass}`}>{msg}</div>
     </div>
   );
 }
