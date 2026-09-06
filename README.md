@@ -22,5 +22,5 @@ npm install
 npm run build     # runs tsc -b, then vite build
 ```
 
-The build output goes to `dist/` and is fully static — deploy it anywhere
+The single page output goes to `dist/` and is fully static — deploy it anywhere
 that serves static files.
