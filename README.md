@@ -20,7 +20,6 @@ npm run typecheck
 ```bash
 npm install
 npm run build     # runs tsc -b, then vite build
-npm run preview   # to preview the production build locally
 ```
 
 The build output goes to `dist/` and is fully static — deploy it anywhere
