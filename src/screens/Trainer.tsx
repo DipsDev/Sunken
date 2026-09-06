@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { CodePath, Draft, Entry, Grid } from "../types";
 import { genPassword, sharesToHexStrings } from "../lib/crypto";
 import { split } from "shamir-secret-sharing";
@@ -20,9 +20,6 @@ interface GeneratedSetup {
   codePath: CodePath | null;
 }
 
-/**
- * Asynchronously generates a valid password and attempts Sudoku generation up to maxRetries times.
- */
 async function generateSetup(
   draft: Draft,
   maxRetries = 3,
@@ -65,7 +62,6 @@ export default function Trainer({ draft, onFinish }: TrainerProps) {
   const [round, setRound] = useState<1 | 2>(1);
   const [pos, setPos] = useState(0);
   const [finishing, setFinishing] = useState(false);
-  const inputRef = useRef<HTMLInputElement>(null);
 
   // Generate valid password & grid asynchronously on component mount
   useEffect(() => {
@@ -93,20 +89,25 @@ export default function Trainer({ draft, onFinish }: TrainerProps) {
 
   const bloatedPassword = useMemo(() => {
     if (!setup?.password) return [];
-    return setup.password.split("").flatMap((letter) => {
-      const randomChar = genPassword(draft.type, 1)[0];
-      return Math.random() < 0.8 ? [randomChar, "Delete", letter] : [letter];
+
+    return setup.password.split("").flatMap((letter, i) => {
+      if (i + 1 === setup.password.length) {
+        return [letter];
+      }
+
+      const bloatedActions: string[] = [];
+      while (Math.random() < 0.45) {
+        const randomChar = genPassword(draft.type, 1)[0];
+        const mid = Math.floor(bloatedActions.length / 2);
+        bloatedActions.splice(mid, 0, randomChar, "Delete");
+      }
+
+      return [...bloatedActions, letter];
     });
   }, [setup?.password, draft.type, round]);
 
   const total = bloatedPassword.length;
   const target = bloatedPassword[pos];
-
-  useEffect(() => {
-    if (!finishing && !loading && setup) {
-      inputRef.current?.focus();
-    }
-  }, [pos, round, finishing, loading, setup]);
 
   function advance() {
     const nextPos = pos + 1;

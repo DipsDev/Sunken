@@ -23,7 +23,10 @@ export default function App() {
   const [doneData, setDoneData] = useState<DoneData | null>(null);
   const [recoverLabel, setRecoverLabel] = useState<string | null>(null);
 
-  const [_, setEntries] = useLocalStorage<Entry[]>("password_entries", []);
+  const [entries, setEntries] = useLocalStorage<Entry[]>(
+    "password_entries",
+    [],
+  );
 
   function goHome() {
     setScreen("home");
@@ -61,6 +64,8 @@ export default function App() {
 
       {screen === "home" && (
         <Home
+          entries={entries}
+          setEntries={setEntries}
           key={homeKey}
           onNew={() => setScreen("new")}
           onRecover={handleRecover}

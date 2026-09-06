@@ -1,17 +1,20 @@
+import { Dispatch } from "react";
 import type { Entry } from "../types";
-import { useLocalStorage } from "../hooks/useLocalStorage";
 
 interface HomeProps {
   onNew: () => void;
   onRecover: (label: string) => void;
+
+  entries: Entry[];
+  setEntries: Dispatch<React.SetStateAction<Entry[]>>;
 }
 
-export default function Home({ onNew, onRecover }: HomeProps) {
-  const [entries, setEntries] = useLocalStorage<Entry[]>(
-    "password_entries",
-    [],
-  );
-
+export default function Home({
+  onNew,
+  onRecover,
+  entries,
+  setEntries,
+}: HomeProps) {
   async function handleDelete(label: string) {
     if (
       !window.confirm(

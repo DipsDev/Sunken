@@ -29,14 +29,11 @@ export function useLocalStorage<T>(
   const setValue: Dispatch<SetStateAction<T>> = useCallback(
     (value) => {
       try {
-        // תמיכה בטעינת ערך פונקציונלי (כמו setNumber(prev => prev + 1))
         const valueToStore =
           value instanceof Function ? value(storedValue) : value;
 
-        // עדכון ה-State של React
         setStoredValue(valueToStore);
 
-        // שמירה ב-LocalStorage
         if (typeof window !== "undefined") {
           window.localStorage.setItem(key, JSON.stringify(valueToStore));
         }
@@ -47,7 +44,6 @@ export function useLocalStorage<T>(
     [key, storedValue],
   );
 
-  // 4. בונוס: האזנה לשינויים כדי לסנכרן טאבים או קומפוננטות שונות
   useEffect(() => {
     const handleStorageChange = (event: StorageEvent) => {
       if (event.key === key && event.newValue !== null) {
